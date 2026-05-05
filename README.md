@@ -61,6 +61,6 @@ Each generated icon component follows this pattern:
 
 Need batch generation into an icon system (`src/icons`, registry, and global `<Icon />`)?
 
-- Extension repo: [github.com/Zolfikaar/SVG-Vue](https://github.com/Zolfikaar/SVG-Vue)
+- Extension repo: [Link](https://github.com/Zolfikaar/SVG-Vue)
 - VS Code Marketplace: [SVG to Vue](https://marketplace.visualstudio.com/items?itemName=UrLabs.svg-to-vue)
-- [Install directly in VS Code](vscode:extension/UrLabs.svg-to-vue)
+- Install directly in VS Code: [Link](vscode:extension/UrLabs.svg-to-vue)
