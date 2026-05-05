@@ -3,7 +3,7 @@
 Convert SVG files into ready-to-use Vue 3 icon components directly in the browser.  
 This web app is the quick, no-project-setup companion to the VS Code extension.
 
-[Open the web app](https://svg-to-vue.app)
+[Open the web app](https://svg-vue-web-hlrx-14d65rndo-fukarwork-5039s-projects.vercel.app/)
 
 ---
 
@@ -62,5 +62,5 @@ Each generated icon component follows this pattern:
 Need batch generation into an icon system (`src/icons`, registry, and global `<Icon />`)?
 
 - Extension repo: [github.com/Zolfikaar/SVG-Vue](https://github.com/Zolfikaar/SVG-Vue)
-- VS Code Marketplace: [Search SVG to Vue](https://marketplace.visualstudio.com/search?term=svg-to-vue&target=VSCode&category=All%20categories&sortBy=Relevance)
-- Direct VS Code link: `vscode:extension/svg-to-vue.svg-to-vue`
+- VS Code Marketplace: [SVG to Vue](https://marketplace.visualstudio.com/items?itemName=UrLabs.svg-to-vue)
+- [Install directly in VS Code](vscode:extension/UrLabs.svg-to-vue)
