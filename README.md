@@ -1,26 +1,66 @@
-# SVG to Vue Components
+# SVG to Vue (Web)
 
-A small developer tool that converts uploaded SVG files into ready-to-use Vue 3 components.
+Convert SVG files into ready-to-use Vue 3 icon components directly in the browser.  
+This web app is the quick, no-project-setup companion to the VS Code extension.
 
-## Setup
+[Open the web app](https://svg-to-vue.app)
+
+---
+
+## Features
+
+- Drag-and-drop or browse to upload one or more `.svg` files
+- Per-file output with generated Vue SFC component names (`user.svg` -> `UserIcon.vue`)
+- Expand/collapse generated code and copy each component with one click
+- SVG optimization via SVGO (`preset-default`) before generation
+- Geometry-aware `viewBox` derivation (supports transforms and common SVG shapes)
+- Root SVG attributes are preserved where safe; sizing is controlled by a `size` prop
+
+---
+
+## How it works
+
+1. Upload SVG files in the app.
+2. Each SVG is optimized and parsed in-browser.
+3. The app computes/normalizes `viewBox`, applies `fill="currentColor"` to fills, and generates a Vue component.
+4. You copy the generated SFC code and paste it into your project.
+
+---
+
+## Local development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the URL shown in the terminal (e.g. http://localhost:5173).
+Open the URL shown in the terminal (typically `http://localhost:5173`).
 
-## Usage
+### Build for production
 
-1. Click **Upload SVG files** and select one or more `.svg` files.
-2. Each file appears in the list with its generated component name (e.g. `user.svg` → `UserIcon.vue`).
-3. The Vue component code is shown in a code block.
-4. Click **Copy** to copy the component code to the clipboard.
+```bash
+npm run build
+npm run preview
+```
 
-## Generated component
+---
 
-- Keeps the original `viewBox`.
-- Removes `width` and `height` from the SVG.
-- Replaces `fill="#000"` (and `fill="black"`) with `fill="currentColor"`.
-- Adds a `size` prop (default `24`) for the icon dimensions.
+## Generated component shape
+
+Each generated icon component follows this pattern:
+
+- Vue 3 `<script setup>`
+- `size` prop (`Number | String`, default `24`)
+- `<svg :width="size" :height="size">`
+- `fill="currentColor"` for easy CSS-driven coloring
+- Preserved/derived `viewBox` for reliable scaling
+
+---
+
+## VS Code extension
+
+Need batch generation into an icon system (`src/icons`, registry, and global `<Icon />`)?
+
+- Extension repo: [github.com/Zolfikaar/SVG-Vue](https://github.com/Zolfikaar/SVG-Vue)
+- VS Code Marketplace: [Search SVG to Vue](https://marketplace.visualstudio.com/search?term=svg-to-vue&target=VSCode&category=All%20categories&sortBy=Relevance)
+- Direct VS Code link: `vscode:extension/svg-to-vue.svg-to-vue`
