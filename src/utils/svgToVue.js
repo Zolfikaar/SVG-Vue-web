@@ -1,6 +1,10 @@
+import { optimize } from 'svgo/browser'
+import SvgPath from 'svgpath'
+import { svgPathBbox } from 'svg-path-bbox'
+
 /**
  * Convert a file name to a Vue component name.
- * user.svg → UserIcon, arrow-right.svg → ArrowRightIcon
+ * user.svg -> UserIcon, arrow-right.svg -> ArrowRightIcon
  */
 export function fileNameToComponentName(fileName) {
   const base = fileName.replace(/\.svg$/i, '').trim()
@@ -12,36 +16,341 @@ export function fileNameToComponentName(fileName) {
   return pascal + 'Icon'
 }
 
+const RAD = Math.PI / 180
+
+function identity() {
+  return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }
+}
+
+function multiply(m1, m2) {
+  return {
+    a: m1.a * m2.a + m1.c * m2.b,
+    b: m1.b * m2.a + m1.d * m2.b,
+    c: m1.a * m2.c + m1.c * m2.d,
+    d: m1.b * m2.c + m1.d * m2.d,
+    e: m1.a * m2.e + m1.c * m2.f + m1.e,
+    f: m1.b * m2.e + m1.d * m2.f + m1.f,
+  }
+}
+
+function transformPoint(m, x, y) {
+  return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f]
+}
+
+function parseNumber(s) {
+  const t = String(s ?? '').trim()
+  if (!t) return 0
+  const n = parseFloat(t.replace(/(px|pt|em|ex|rem|cm|mm|in|pc|%)/gi, ''))
+  return Number.isFinite(n) ? n : 0
+}
+
+function parseNumbers(args) {
+  return String(args ?? '')
+    .replace(/,/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(parseNumber)
+}
+
+function parseTransform(attr) {
+  if (!attr?.trim()) return identity()
+  const re = /\s*(matrix|translate|scale|rotate|skewX|skewY)\s*\(([^)]*)\)/gi
+  let combined = identity()
+  let m
+  while ((m = re.exec(attr)) !== null) {
+    const kind = m[1].toLowerCase()
+    const nums = parseNumbers(m[2])
+    let next = identity()
+    switch (kind) {
+      case 'matrix':
+        if (nums.length >= 6) {
+          next = { a: nums[0], b: nums[1], c: nums[2], d: nums[3], e: nums[4], f: nums[5] }
+        }
+        break
+      case 'translate':
+        next = { a: 1, b: 0, c: 0, d: 1, e: nums[0] ?? 0, f: nums[1] ?? 0 }
+        break
+      case 'scale':
+        next = { a: nums[0] ?? 1, b: 0, c: 0, d: nums.length >= 2 ? nums[1] : nums[0] ?? 1, e: 0, f: 0 }
+        break
+      case 'rotate': {
+        const deg = nums[0] ?? 0
+        const rad = deg * RAD
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        const cx = nums[1] ?? 0
+        const cy = nums[2] ?? 0
+        if (nums.length >= 3) {
+          const t1 = { a: 1, b: 0, c: 0, d: 1, e: cx, f: cy }
+          const r = { a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 }
+          const t2 = { a: 1, b: 0, c: 0, d: 1, e: -cx, f: -cy }
+          next = multiply(multiply(t1, r), t2)
+        } else {
+          next = { a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 }
+        }
+        break
+      }
+      case 'skewx':
+        next = { a: 1, b: 0, c: Math.tan((nums[0] ?? 0) * RAD), d: 1, e: 0, f: 0 }
+        break
+      case 'skewy':
+        next = { a: 1, b: Math.tan((nums[0] ?? 0) * RAD), c: 0, d: 1, e: 0, f: 0 }
+        break
+      default:
+        break
+    }
+    combined = multiply(combined, next)
+  }
+  return combined
+}
+
+function unionBBox(a, b) {
+  if (!a) return b
+  if (!b) return a
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]
+}
+
+function bboxFromPoints(matrix, points) {
+  if (!points.length) return null
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const [x, y] of points) {
+    const [tx, ty] = transformPoint(matrix, x, y)
+    minX = Math.min(minX, tx)
+    minY = Math.min(minY, ty)
+    maxX = Math.max(maxX, tx)
+    maxY = Math.max(maxY, ty)
+  }
+  return [minX, minY, maxX, maxY]
+}
+
+function parsePointsAttr(s) {
+  if (!s?.trim()) return []
+  const nums = parseNumbers(s)
+  const out = []
+  for (let i = 0; i + 1 < nums.length; i += 2) {
+    out.push([nums[i], nums[i + 1]])
+  }
+  return out
+}
+
+function circleSamplePoints(cx, cy, r, n) {
+  const pts = []
+  for (let i = 0; i < n; i++) {
+    const ang = (2 * Math.PI * i) / n
+    pts.push([cx + r * Math.cos(ang), cy + r * Math.sin(ang)])
+  }
+  return pts
+}
+
+function ellipseSamplePoints(cx, cy, rx, ry, n) {
+  const pts = []
+  for (let i = 0; i < n; i++) {
+    const ang = (2 * Math.PI * i) / n
+    pts.push([cx + rx * Math.cos(ang), cy + ry * Math.sin(ang)])
+  }
+  return pts
+}
+
+function elementBBox(el, matrix) {
+  const name = (el.localName || el.tagName || '').toLowerCase()
+  switch (name) {
+    case 'path': {
+      const d = el.getAttribute('d')?.trim()
+      if (!d) return null
+      try {
+        const d2 = new SvgPath(d).matrix([matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f]).round(4).toString()
+        return svgPathBbox(d2)
+      } catch {
+        return null
+      }
+    }
+    case 'rect': {
+      const x = parseNumber(el.getAttribute('x') ?? '0')
+      const y = parseNumber(el.getAttribute('y') ?? '0')
+      const w = parseNumber(el.getAttribute('width') ?? '0')
+      const h = parseNumber(el.getAttribute('height') ?? '0')
+      if (w <= 0 || h <= 0) return null
+      return bboxFromPoints(matrix, [[x, y], [x + w, y], [x + w, y + h], [x, y + h]])
+    }
+    case 'circle': {
+      const cx = parseNumber(el.getAttribute('cx') ?? '0')
+      const cy = parseNumber(el.getAttribute('cy') ?? '0')
+      const r = parseNumber(el.getAttribute('r') ?? '0')
+      if (r <= 0) return null
+      return bboxFromPoints(matrix, circleSamplePoints(cx, cy, r, 48))
+    }
+    case 'ellipse': {
+      const cx = parseNumber(el.getAttribute('cx') ?? '0')
+      const cy = parseNumber(el.getAttribute('cy') ?? '0')
+      const rx = parseNumber(el.getAttribute('rx') ?? '0')
+      const ry = parseNumber(el.getAttribute('ry') ?? '0')
+      if (rx <= 0 || ry <= 0) return null
+      return bboxFromPoints(matrix, ellipseSamplePoints(cx, cy, rx, ry, 48))
+    }
+    case 'line': {
+      const x1 = parseNumber(el.getAttribute('x1') ?? '0')
+      const y1 = parseNumber(el.getAttribute('y1') ?? '0')
+      const x2 = parseNumber(el.getAttribute('x2') ?? '0')
+      const y2 = parseNumber(el.getAttribute('y2') ?? '0')
+      return bboxFromPoints(matrix, [[x1, y1], [x2, y2]])
+    }
+    case 'polyline':
+    case 'polygon': {
+      const pts = parsePointsAttr(el.getAttribute('points'))
+      if (!pts.length) return null
+      return bboxFromPoints(matrix, pts)
+    }
+    case 'image': {
+      const x = parseNumber(el.getAttribute('x') ?? '0')
+      const y = parseNumber(el.getAttribute('y') ?? '0')
+      const w = parseNumber(el.getAttribute('width') ?? '0')
+      const h = parseNumber(el.getAttribute('height') ?? '0')
+      if (w <= 0 || h <= 0) return null
+      return bboxFromPoints(matrix, [[x, y], [x + w, y], [x + w, y + h], [x, y + h]])
+    }
+    default:
+      return null
+  }
+}
+
+const SKIP_TAGS = new Set([
+  'defs', 'clippath', 'mask', 'pattern', 'filter', 'lineargradient', 'radialgradient',
+  'stop', 'style', 'title', 'desc', 'metadata', 'script', 'animate', 'animatetransform', 'set', 'symbol',
+])
+
+function walkFixed(el, parentMatrix) {
+  const local = parseTransform(el.getAttribute('transform'))
+  const name = (el.localName || el.tagName || '').toLowerCase()
+  let matrix = multiply(parentMatrix, local)
+
+  const parent = el.parentNode
+  const isNestedSvg = name === 'svg' && parent && parent.nodeType === 1
+  if (isNestedSvg) {
+    const x = parseNumber(el.getAttribute('x') ?? '0')
+    const y = parseNumber(el.getAttribute('y') ?? '0')
+    matrix = multiply(matrix, { a: 1, b: 0, c: 0, d: 1, e: x, f: y })
+  }
+
+  let acc = null
+  if (!SKIP_TAGS.has(name)) {
+    acc = unionBBox(acc, elementBBox(el, matrix))
+  }
+  if (name === 'defs' || name === 'clippath' || name === 'mask' || name === 'symbol') return acc
+
+  for (let i = 0; i < el.childNodes.length; i++) {
+    const ch = el.childNodes[i]
+    if (ch?.nodeType === 1) {
+      acc = unionBBox(acc, walkFixed(ch, matrix))
+    }
+  }
+  return acc
+}
+
+function computeContentBBox(svgRoot) {
+  return walkFixed(svgRoot, identity())
+}
+
+function round4(n) {
+  return Math.round(n * 10000) / 10000
+}
+
+function bboxToViewBox(b) {
+  const w = b[2] - b[0]
+  const h = b[3] - b[1]
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null
+  return `${round4(b[0])} ${round4(b[1])} ${round4(w)} ${round4(h)}`
+}
+
+function parseViewBoxFromSvgRoot(svg) {
+  const vb = svg.getAttribute('viewBox')?.trim()
+  if (vb) {
+    const parts = vb.split(/[\s,]+/).map(parseNumber)
+    if (parts.length === 4 && parts.every(Number.isFinite)) {
+      const [x, y, w, h] = parts
+      if (w > 0 && h > 0) return `${round4(x)} ${round4(y)} ${round4(w)} ${round4(h)}`
+    }
+  }
+  const sw = parseNumber(svg.getAttribute('width') ?? '')
+  const sh = parseNumber(svg.getAttribute('height') ?? '')
+  if (sw > 0 && sh > 0) return `0 0 ${round4(sw)} ${round4(sh)}`
+  return null
+}
+
+function parseSvgDocument(svgXml) {
+  const doc = new DOMParser().parseFromString(svgXml, 'image/svg+xml')
+  const root = doc.documentElement
+  if (!root || root.nodeName.toLowerCase() !== 'svg') return null
+  return doc
+}
+
+function serializeSvgInnerContent(svgRoot) {
+  const serializer = new XMLSerializer()
+  let out = ''
+  for (let i = 0; i < svgRoot.childNodes.length; i++) {
+    out += serializer.serializeToString(svgRoot.childNodes[i])
+  }
+  return out
+}
+
+const BLOCKED_ROOT_ATTRS = new Set(['width', 'height', 'viewbox', 'xmlns', 'xmlns:xlink', 'fill', 'version'])
+
+function formatRootAttributes(svgRoot) {
+  if (!svgRoot.attributes?.length) return ''
+  const parts = []
+  for (let i = 0; i < svgRoot.attributes.length; i++) {
+    const a = svgRoot.attributes[i]
+    const n = a.name.toLowerCase()
+    if (BLOCKED_ROOT_ATTRS.has(n)) continue
+    const val = a.value.replace(/"/g, '&quot;')
+    parts.push(`${a.name}="${val}"`)
+  }
+  return parts.length ? ` ${parts.join(' ')}` : ''
+}
+
+function applyCurrentColorToFills(svgFragment) {
+  let s = svgFragment.replace(/\sfill\s*=\s*"[^"]*"/gi, ' fill="currentColor"')
+  s = s.replace(/\sfill\s*=\s*'[^']*'/gi, ' fill="currentColor"')
+  return s
+}
+
 /**
- * Parse SVG string: extract viewBox, inner content; remove width/height; normalize fill.
+ * Parse SVG string with optimized + geometry-aware viewBox logic.
  */
 export function parseSvg(svgText) {
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(svgText, 'image/svg+xml')
-  const svg = doc.querySelector('svg')
-  if (!svg) return null
+  if (!/<svg[\s\S]*<\/svg>/i.test(svgText?.trim() ?? '')) return null
 
-  const viewBox = svg.getAttribute('viewBox') || '0 0 24 24'
+  let optimized = svgText
+  try {
+    optimized = optimize(svgText, { multipass: true, plugins: ['preset-default'] }).data
+  } catch {
+    optimized = svgText
+  }
 
-  // Clone to avoid mutating the parsed document when we get innerHTML
-  const clone = svg.cloneNode(true)
-  clone.removeAttribute('width')
-  clone.removeAttribute('height')
+  let doc = parseSvgDocument(optimized)
+  if (!doc?.documentElement) {
+    doc = parseSvgDocument(svgText)
+  }
+  if (!doc?.documentElement) return null
 
-  let inner = clone.innerHTML
+  const svgRoot = doc.documentElement
+  const bbox = computeContentBBox(svgRoot)
+  const viewBox = (bbox ? bboxToViewBox(bbox) : null) ?? parseViewBoxFromSvgRoot(svgRoot) ?? '0 0 24 24'
 
-  // Replace fill="#000" (and common black variants) with fill="currentColor"
-  inner = inner.replace(/\bfill\s*=\s*["']#000(000)?["']/gi, 'fill="currentColor"')
-  inner = inner.replace(/\bfill\s*=\s*["']black["']/gi, 'fill="currentColor"')
+  let inner = serializeSvgInnerContent(svgRoot)
+  inner = applyCurrentColorToFills(inner)
+  const extraAttrs = formatRootAttributes(svgRoot)
 
-  return { viewBox, inner }
+  return { viewBox, inner, extraAttrs }
 }
 
 /**
  * Generate Vue 3 SFC code for an icon component.
  */
-export function generateVueComponent(componentName, viewBox, innerSvg) {
-  // Escape so ${ and ` in SVG content don't break the template literal
+export function generateVueComponent(_componentName, viewBox, innerSvg, extraAttrs = '') {
   const safeInner = innerSvg.replace(/\$\{/g, '\\${').replace(/`/g, '\\`')
   return `<script setup>
 defineProps({
@@ -55,6 +364,7 @@ defineProps({
     :height="size"
     viewBox="${viewBox}"
     fill="currentColor"
+    xmlns="http://www.w3.org/2000/svg"${extraAttrs}
   >
     ${safeInner}
   </svg>

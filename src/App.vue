@@ -39,7 +39,7 @@ const items = computed(() =>
     const componentName = fileNameToComponentName(f.name)
     const code =
       parsed ?
-        generateVueComponent(componentName, parsed.viewBox, parsed.inner)
+        generateVueComponent(componentName, parsed.viewBox, parsed.inner, parsed.extraAttrs)
         : null
     return {
       id: f.id,

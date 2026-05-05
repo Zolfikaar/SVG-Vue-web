@@ -9,6 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "svg-path-bbox": "^2.1.0",
+    "svgo": "^4.0.1",
+    "svgpath": "^2.6.0",
     "vue": "^3.4.0"
   },
   "devDependencies": {
