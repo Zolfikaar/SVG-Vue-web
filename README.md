@@ -3,7 +3,8 @@
 Convert SVG files into ready-to-use Vue 3 icon components directly in the browser.  
 This web app is the quick, no-project-setup companion to the VS Code extension.
 
-[Open the web app](https://svg-vue-web-hlrx-14d65rndo-fukarwork-5039s-projects.vercel.app/)
+[Open the web app](https://svg-vue-web.vercel.app/)
+
 
 ---
 
